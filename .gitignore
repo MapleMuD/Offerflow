@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.playwright-cli/
+resume_work/
+简历成品/
+简历模板参考/
+*.zip
+*.pdf
+*.docx
+*.xlsx
+*.xls
+*.tsbuildinfo
+发布包/
