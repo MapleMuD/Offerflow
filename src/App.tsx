@@ -2,12 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpRight, Award, Bell, BookOpen, BriefcaseBusiness, Building2, CalendarClock,
   CalendarDays, Check, ChevronDown, CircleHelp, Code2, Database, Download, ExternalLink,
-  FileText, Flame, Gauge, GraduationCap, LayoutDashboard, ListFilter, Mail, Menu,
+  FileText, Flame, Gauge, GraduationCap, LayoutDashboard, ListFilter, LockKeyhole, Mail, Menu,
   Pencil, Plus, Radar, Save, Search, ShieldCheck, Sparkles, Target, Trash2, Trophy,
   Upload, UserRound, X
 } from 'lucide-react'
-import { opportunities, outreachStatusOptions, phdTargets, sampleApplications, statusOptions } from './data'
+import { opportunities, outreachStatusOptions, phdTargets, statusOptions } from './data'
 import type { Application, ApplicationStatus, CandidateProfile, Opportunity, OutreachRecord, OutreachStatus, PhdTarget } from './types'
+import { LocalAccountGate, LocalAccountModal } from './LocalAccountUI'
+import {
+  getCurrentAccount, loadAccountData, saveAccountData,
+  type AccountData, type LocalAccount,
+} from './localAccounts'
 
 const STORAGE_KEY = 'offerflow-applications-v1'
 const PROFILE_KEY = 'offerflow-profile-v2'
@@ -22,16 +27,11 @@ const routes: Record<PageName, string> = {
 const pageByRoute = Object.fromEntries(Object.entries(routes).map(([name, route]) => [route, name])) as Record<string, PageName>
 
 const defaultProfile: CandidateProfile = {
-  name: '穆德帅', graduation: '2027 届硕士', school: '中国石油大学（北京）', degree: '计算机技术硕士',
-  major: '计算机技术 / 软件工程', ranking: '综合测评专业第 2/31，开题成绩前 10%',
-  research: '图神经网络、图对比学习、多任务学习、注意力机制、物理约束学习、三维地质属性预测',
-  publications: '第一作者 JCR Q1 论文返修中；CCF-C 论文 1 篇已收录；物理约束 GNN 论文撰写中',
-  awards: 'AIC 人工智能算法大赛国家二等奖；挑战杯青聚 AI 特等奖；蓝桥杯 Python 北京赛区三等奖；两项全国英语翻译赛事二等奖',
-  skills: 'Python、PyTorch、TensorFlow、Vue 2/3、Element Plus、ECharts、Spring Boot、Kafka、Flink、Doris、Git',
-  projects: 'GNN-HA-MTRC 三维地质属性预测；大数据采集分析系统；集输管网与处理站预警系统',
-  targets: 'AI 算法、机器学习工程、图神经网络、数据智能、科学智能', cities: '北京、上海、深圳、杭州、武汉、天津',
-  targetCompanies: '字节跳动、百度、华为、美团、腾讯', targetSchools: '中国科学院、武汉大学、天津大学'
+  name: '新用户', graduation: '', school: '', degree: '', major: '', ranking: '', research: '', publications: '',
+  awards: '', skills: '', projects: '', targets: '', cities: '', targetCompanies: '', targetSchools: ''
 }
+
+const blankAccountData: AccountData = { profile: defaultProfile, applications: [], outreachRecords: [] }
 
 const statusClass: Record<ApplicationStatus, string> = { 待投递: 'neutral', 已投递: 'blue', 笔试: 'violet', 面试: 'orange', Offer: 'green', 已结束: 'muted' }
 const outreachStatusClass: Record<OutreachStatus, string> = { 待筛选: 'neutral', 待套磁: 'violet', 已联系: 'blue', 已回复: 'orange', 已面谈: 'orange', 积极进展: 'green', 已婉拒: 'muted' }
@@ -47,12 +47,20 @@ function readProfile(): CandidateProfile {
     return { ...defaultProfile, ...old }
   } catch { return defaultProfile }
 }
+function readLegacyData(): AccountData {
+  return {
+    profile: readProfile(),
+    applications: readStored(STORAGE_KEY, [] as Application[]),
+    outreachRecords: readStored(OUTREACH_KEY, [] as OutreachRecord[]),
+  }
+}
 function daysUntil(date: string) {
   if (!date) return null
   const today = new Date(); today.setHours(0, 0, 0, 0)
   return Math.ceil((new Date(`${date}T00:00:00`).getTime() - today.getTime()) / 86400000)
 }
 function splitTerms(value: string) { return value.split(/[、,，;/；|\s]+/).map(x => x.trim().toLowerCase()).filter(x => x.length > 1) }
+function countProfileItems(value: string) { return value.split(/[；;\n]+/).map(item => item.trim()).filter(Boolean).length }
 function opportunityMatch(opp: Opportunity, profile: CandidateProfile) {
   const source = `${profile.targets} ${profile.skills} ${profile.research} ${profile.projects}`.toLowerCase()
   const target = `${opp.role} ${opp.category} ${opp.tags.join(' ')}`.toLowerCase()
@@ -70,12 +78,13 @@ function targetMatch(target: PhdTarget, profile: CandidateProfile) {
   return { fit: Math.min(98, 60 + Math.min(hits.length, 4) * 7 + (schoolHit ? 10 : 0)), reasons: hits.slice(0, 3) }
 }
 
-function App() {
+function App({ account, onSessionEnd }: { account: LocalAccount, onSessionEnd: () => void }) {
   const initialPage = pageByRoute[window.location.hash.replace('#/', '')] || '总览'
+  const initialAccountData = useRef(loadAccountData(account.id, blankAccountData)).current
   const [activeNav, setActiveNav] = useState<PageName>(initialPage)
-  const [applications, setApplications] = useState<Application[]>(() => readStored(STORAGE_KEY, sampleApplications))
-  const [outreachRecords, setOutreachRecords] = useState<OutreachRecord[]>(() => readStored(OUTREACH_KEY, []))
-  const [profile, setProfile] = useState<CandidateProfile>(readProfile)
+  const [applications, setApplications] = useState<Application[]>(initialAccountData.applications)
+  const [outreachRecords, setOutreachRecords] = useState<OutreachRecord[]>(initialAccountData.outreachRecords)
+  const [profile, setProfile] = useState<CandidateProfile>({ ...defaultProfile, ...initialAccountData.profile })
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('全部状态')
   const [oppFilter, setOppFilter] = useState('为我推荐')
@@ -89,11 +98,12 @@ function App() {
   const [outreachForm, setOutreachForm] = useState(initialOutreachForm)
   const [toast, setToast] = useState('')
   const [mobileNav, setMobileNav] = useState(false)
+  const [accountOpen, setAccountOpen] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(applications)) }, [applications])
-  useEffect(() => { localStorage.setItem(OUTREACH_KEY, JSON.stringify(outreachRecords)) }, [outreachRecords])
-  useEffect(() => { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)) }, [profile])
+  useEffect(() => {
+    saveAccountData(account.id, { profile, applications, outreachRecords })
+  }, [account.id, applications, outreachRecords, profile])
   useEffect(() => {
     const onHash = () => setActiveNav(pageByRoute[window.location.hash.replace('#/', '')] || '总览')
     window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash)
@@ -107,6 +117,11 @@ function App() {
     offers: applications.filter(a => a.status === 'Offer').length,
     upcoming: applications.filter(a => { const d = daysUntil(a.deadline); return d !== null && d >= 0 && d <= 7 }).length
   }), [applications])
+  const profileCounts = useMemo(() => ({
+    publications: countProfileItems(profile.publications),
+    awards: countProfileItems(profile.awards),
+    projects: countProfileItems(profile.projects),
+  }), [profile.awards, profile.projects, profile.publications])
 
   const matchedOpportunities = useMemo(() => opportunities.map(opp => ({ ...opp, match: opportunityMatch(opp, profile) })), [profile])
   const visibleOpportunities = useMemo(() => matchedOpportunities.filter(o => {
@@ -161,15 +176,15 @@ function App() {
       <button className="close-mobile" onClick={() => setMobileNav(false)} aria-label="关闭导航"><X/></button>
       <div className="season"><span className="season-icon"><Flame size={17}/></span><div><strong>2027 秋招季</strong><small>个人申请管理中</small></div><span className="live-dot"/></div>
       <nav><p>工作台</p>{navItems.map(([label, Icon]) => <button key={label} className={activeNav === label ? 'active' : ''} onClick={() => navigate(label)}><Icon size={18}/><span>{label}</span>{label === '官网情报' && <i>{opportunities.length}</i>}</button>)}<p>我的空间</p><button className={activeNav === '个人档案' ? 'active' : ''} onClick={() => navigate('个人档案')}><UserRound size={18}/><span>个人档案</span></button><button className={activeNav === '数据备份' ? 'active' : ''} onClick={() => navigate('数据备份')}><Database size={18}/><span>数据备份</span></button></nav>
-      <button className="profile-card" onClick={() => navigate('个人档案')}><span className="avatar">穆</span><span><strong>{profile.name}</strong><small>{profile.graduation} · 计算机</small></span><ArrowUpRight size={16}/></button>
+      <button className="profile-card" onClick={() => navigate('个人档案')}><span className="avatar">{profile.name.trim().slice(0, 1) || account.displayName.slice(0, 1)}</span><span><strong>{profile.name || account.displayName}</strong><small>{profile.graduation || '完善个人档案'}</small></span><ArrowUpRight size={16}/></button>
     </aside>
     <main>
-      <header><button className="menu-button" onClick={() => setMobileNav(true)} aria-label="打开导航"><Menu/></button><div className="page-location"><small>OfferFlow</small><strong>{activeNav}</strong></div><div className="global-search"><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索公司、岗位、院校或导师"/></div><div className="header-actions"><button className="icon-button" title="临期提醒"><Bell size={20}/>{stats.upcoming > 0 && <span/>}</button>{activeNav === '博士申请' ? <button className="primary" onClick={() => openOutreach()}><Plus size={17}/> 新增套磁</button> : ['总览','投递管理','官网情报'].includes(activeNav) ? <button className="primary" onClick={() => openAdd()}><Plus size={17}/> 新增投递</button> : null}</div></header>
+      <header><button className="menu-button" onClick={() => setMobileNav(true)} aria-label="打开导航"><Menu/></button><div className="page-location"><small>OfferFlow</small><strong>{activeNav}</strong></div><div className="global-search"><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索公司、岗位、院校或导师"/></div><div className="header-actions"><button className="account-trigger" onClick={() => setAccountOpen(true)} title="管理本机账号"><LockKeyhole size={16}/><span>{account.displayName}</span><small>本机账号</small></button><button className="icon-button" title="临期提醒"><Bell size={20}/>{stats.upcoming > 0 && <span/>}</button>{activeNav === '博士申请' ? <button className="primary" onClick={() => openOutreach()}><Plus size={17}/> 新增套磁</button> : ['总览','投递管理','官网情报'].includes(activeNav) ? <button className="primary" onClick={() => openAdd()}><Plus size={17}/> 新增投递</button> : null}</div></header>
       <div className="content page-content">
         {activeNav === '总览' && <>
           <PageTitle title={`你好，${profile.name}`} description="今天需要推进的投递、套磁与截止日期都集中在这里。" icon={<LayoutDashboard/>}/>
           <section className="stats-grid"><Metric icon={<BriefcaseBusiness/>} label="投递总数" value={stats.total} hint="全部记录" color="orange"/><Metric icon={<Gauge/>} label="进行中" value={stats.active} hint="等待下一进展" color="blue"/><Metric icon={<CalendarDays/>} label="面试阶段" value={stats.interviews} hint="及时准备" color="violet"/><Metric icon={<Check/>} label="收到 Offer" value={stats.offers} hint="持续推进" color="green"/></section>
-          <button className="profile-banner" onClick={() => navigate('个人档案')}><span className="profile-glow"><Sparkles/></span><span className="profile-copy"><small>实时匹配已启用</small><strong>简历画像已连接到公司与博士目标</strong><span>{profile.research}</span></span><span className="profile-proof"><b>3</b><small>项学术成果</small></span><span className="profile-proof"><b>5+</b><small>项核心竞赛</small></span><span className="banner-link">管理档案 <ArrowUpRight size={16}/></span></button>
+          <button className="profile-banner" onClick={() => navigate('个人档案')}><span className="profile-glow"><Sparkles/></span><span className="profile-copy"><small>实时匹配已启用</small><strong>简历画像已连接到公司与博士目标</strong><span>{profile.research || '完善研究方向与求职偏好后，推荐结果会更准确'}</span></span><span className="profile-proof"><b>{profileCounts.publications}</b><small>项学术成果</small></span><span className="profile-proof"><b>{profileCounts.awards}</b><small>项竞赛荣誉</small></span><span className="banner-link">管理档案 <ArrowUpRight size={16}/></span></button>
           <section className="overview-grid"><div className="panel compact-panel"><div className="panel-head"><div><h2>最近投递</h2><p>已按投递日期从新到旧排列</p></div><button className="text-button" onClick={() => navigate('投递管理')}>全部记录 <ArrowUpRight size={15}/></button></div><QuickApplications items={filteredApps.slice(0, 4)}/></div><div className="panel compact-panel"><div className="panel-head"><div><h2>优先推荐</h2><p>根据个人档案实时计算</p></div><button className="text-button" onClick={() => navigate('官网情报')}>招聘雷达 <ArrowUpRight size={15}/></button></div><div className="quick-list">{visibleOpportunities.slice(0, 4).map(x => <div key={x.id}><span className="mini-logo">{x.short}</span><p><b>{x.company}</b><small>{x.role}</small></p><strong>{x.match.fit}%</strong></div>)}</div></div></section>
         </>}
 
@@ -184,15 +199,16 @@ function App() {
 
         {activeNav === '截止日历' && <><PageTitle title="截止日期与跟进" description="把企业截止日期和导师跟进日期合并到一条时间线。" icon={<CalendarDays/>}/><section className="panel calendar-panel">{calendarItems.length ? <div className="timeline">{calendarItems.map(item => { const days = daysUntil(item.date); return <article key={item.id} className={days !== null && days < 0 ? 'past' : days !== null && days <= 7 ? 'urgent' : ''}><time>{item.date}</time><span className="timeline-mark"/><div><small>{item.type}</small><h3>{item.title}</h3><p>{days === null ? item.note : days < 0 ? `已过去 ${Math.abs(days)} 天` : days === 0 ? '今天' : `${days} 天后`} · {item.note}</p></div></article>})}</div> : <Empty icon={<CalendarDays/>} title="暂无日期安排" text="在投递记录中填写截止日期，或在套磁记录中填写下次跟进日期。"/>}</section></>}
 
-        {activeNav === '个人档案' && <><PageTitle title="个人档案与实时匹配" description="内容来自你的简历，修改任一字段后，公司与博士目标的匹配结果会立即更新。" icon={<UserRound/>}/><section className="profile-layout"><div className="profile-score"><div className="profile-score-head"><span><Sparkles/></span><div><small>画像完整度</small><strong>已连接推荐引擎</strong></div></div><div className="profile-highlights"><span><BookOpen/><b>3 项</b><small>学术成果</small></span><span><Trophy/><b>5+ 项</b><small>核心竞赛</small></span><span><Code2/><b>3 项</b><small>项目经历</small></span></div><p>推荐排序只在当前浏览器计算，不会上传你的简历或个人信息。</p></div><form className="profile-editor" onSubmit={e => { e.preventDefault(); setToast('个人档案已保存，匹配结果已更新') }}><ProfileGroup title="基本与教育" icon={<GraduationCap/>}><ProfileField label="姓名" value={profile.name} onChange={name => setProfile({ ...profile, name })}/><ProfileField label="毕业届别" value={profile.graduation} onChange={graduation => setProfile({ ...profile, graduation })}/><ProfileField label="学校" value={profile.school} onChange={school => setProfile({ ...profile, school })}/><ProfileField label="学历" value={profile.degree} onChange={degree => setProfile({ ...profile, degree })}/><ProfileField label="专业" value={profile.major} onChange={major => setProfile({ ...profile, major })}/><ProfileField label="成绩与排名" value={profile.ranking} onChange={ranking => setProfile({ ...profile, ranking })}/></ProfileGroup><ProfileGroup title="简历能力" icon={<Award/>}><ProfileArea label="研究方向" value={profile.research} onChange={research => setProfile({ ...profile, research })}/><ProfileArea label="论文与学术成果" value={profile.publications} onChange={publications => setProfile({ ...profile, publications })}/><ProfileArea label="竞赛与荣誉" value={profile.awards} onChange={awards => setProfile({ ...profile, awards })}/><ProfileArea label="技术技能" value={profile.skills} onChange={skills => setProfile({ ...profile, skills })}/><ProfileArea label="项目经历" value={profile.projects} onChange={projects => setProfile({ ...profile, projects })}/></ProfileGroup><ProfileGroup title="目标偏好" icon={<Target/>}><ProfileArea label="目标岗位" value={profile.targets} onChange={targets => setProfile({ ...profile, targets })}/><ProfileField label="意向城市" value={profile.cities} onChange={cities => setProfile({ ...profile, cities })}/><ProfileField label="目标公司" value={profile.targetCompanies} onChange={targetCompanies => setProfile({ ...profile, targetCompanies })}/><ProfileField label="目标院校 / 研究所" value={profile.targetSchools} onChange={targetSchools => setProfile({ ...profile, targetSchools })}/></ProfileGroup><div className="profile-actions"><button type="button" onClick={() => setProfile(defaultProfile)}>恢复简历档案</button><button className="primary" type="submit"><Save size={16}/> 保存档案</button></div></form><aside className="live-preview"><h2>实时匹配预览</h2><p>当前修改会即时反映在这里</p><h3>公司机会</h3>{visibleOpportunities.slice(0, 3).map(x => <div key={x.id}><span>{x.company}</span><b>{x.match.fit}%</b><small>{x.match.reasons.join(' · ')}</small></div>)}<h3>博士目标</h3>{visibleTargets.slice(0, 3).map(x => <div key={x.id}><span>{x.institution}</span><b>{x.match.fit}%</b><small>{x.match.reasons.join(' · ') || '待精筛导师'}</small></div>)}</aside></section></>}
+        {activeNav === '个人档案' && <><PageTitle title="个人档案与实时匹配" description="内容来自你的简历，修改任一字段后，公司与博士目标的匹配结果会立即更新。" icon={<UserRound/>}/><section className="profile-layout"><div className="profile-score"><div className="profile-score-head"><span><Sparkles/></span><div><small>画像完整度</small><strong>已连接推荐引擎</strong></div></div><div className="profile-highlights"><span><BookOpen/><b>{profileCounts.publications} 项</b><small>学术成果</small></span><span><Trophy/><b>{profileCounts.awards} 项</b><small>竞赛荣誉</small></span><span><Code2/><b>{profileCounts.projects} 项</b><small>项目经历</small></span></div><p>推荐排序只在当前浏览器计算，内容自动保存到账号“{account.username}”的本机空间。</p></div><form className="profile-editor" onSubmit={e => { e.preventDefault(); setToast('个人档案已保存，匹配结果已更新') }}><ProfileGroup title="基本与教育" icon={<GraduationCap/>}><ProfileField label="姓名" value={profile.name} onChange={name => setProfile({ ...profile, name })}/><ProfileField label="毕业届别" value={profile.graduation} onChange={graduation => setProfile({ ...profile, graduation })}/><ProfileField label="学校" value={profile.school} onChange={school => setProfile({ ...profile, school })}/><ProfileField label="学历" value={profile.degree} onChange={degree => setProfile({ ...profile, degree })}/><ProfileField label="专业" value={profile.major} onChange={major => setProfile({ ...profile, major })}/><ProfileField label="成绩与排名" value={profile.ranking} onChange={ranking => setProfile({ ...profile, ranking })}/></ProfileGroup><ProfileGroup title="简历能力" icon={<Award/>}><ProfileArea label="研究方向" value={profile.research} onChange={research => setProfile({ ...profile, research })}/><ProfileArea label="论文与学术成果" value={profile.publications} onChange={publications => setProfile({ ...profile, publications })}/><ProfileArea label="竞赛与荣誉" value={profile.awards} onChange={awards => setProfile({ ...profile, awards })}/><ProfileArea label="技术技能" value={profile.skills} onChange={skills => setProfile({ ...profile, skills })}/><ProfileArea label="项目经历" value={profile.projects} onChange={projects => setProfile({ ...profile, projects })}/></ProfileGroup><ProfileGroup title="目标偏好" icon={<Target/>}><ProfileArea label="目标岗位" value={profile.targets} onChange={targets => setProfile({ ...profile, targets })}/><ProfileField label="意向城市" value={profile.cities} onChange={cities => setProfile({ ...profile, cities })}/><ProfileField label="目标公司" value={profile.targetCompanies} onChange={targetCompanies => setProfile({ ...profile, targetCompanies })}/><ProfileField label="目标院校 / 研究所" value={profile.targetSchools} onChange={targetSchools => setProfile({ ...profile, targetSchools })}/></ProfileGroup><div className="profile-actions"><button type="button" onClick={() => setProfile(defaultProfile)}>清空档案</button><button className="primary" type="submit"><Save size={16}/> 保存档案</button></div></form><aside className="live-preview"><h2>实时匹配预览</h2><p>当前修改会即时反映在这里</p><h3>公司机会</h3>{visibleOpportunities.slice(0, 3).map(x => <div key={x.id}><span>{x.company}</span><b>{x.match.fit}%</b><small>{x.match.reasons.join(' · ')}</small></div>)}<h3>博士目标</h3>{visibleTargets.slice(0, 3).map(x => <div key={x.id}><span>{x.institution}</span><b>{x.match.fit}%</b><small>{x.match.reasons.join(' · ') || '待精筛导师'}</small></div>)}</aside></section></>}
 
-        {activeNav === '数据备份' && <><PageTitle title="数据备份与迁移" description="所有数据默认只保存在当前浏览器，请定期导出备份。" icon={<Database/>}/><section className="backup-grid"><button onClick={exportData}><span><Download/></span><div><h2>导出完整备份</h2><p>包含个人档案、投递记录和套磁记录，保存为 JSON 文件。</p></div><ArrowUpRight/></button><button onClick={() => importRef.current?.click()}><span><Upload/></span><div><h2>导入历史备份</h2><p>选择 OfferFlow 导出的 JSON 文件，恢复到当前浏览器。</p></div><ArrowUpRight/></button><div className="privacy-note"><ShieldCheck/><div><h2>本地隐私模式</h2><p>目前没有后端数据库，不会把姓名、简历画像或投递记录上传到服务器。公开链接中的每位使用者都有独立的浏览器数据。</p></div></div></section></>}
-        <footer><span>OfferFlow · 数据仅存储在当前浏览器</span><span>独立页面 · 实时匹配 · 自动排序</span></footer>
+        {activeNav === '数据备份' && <><PageTitle title="数据备份与迁移" description={`当前内容属于本机账号“${account.username}”，建议定期导出备份。`} icon={<Database/>}/><section className="backup-grid"><button onClick={exportData}><span><Download/></span><div><h2>导出完整备份</h2><p>包含个人档案、投递记录和套磁记录，保存为 JSON 文件。</p></div><ArrowUpRight/></button><button onClick={() => importRef.current?.click()}><span><Upload/></span><div><h2>导入历史备份</h2><p>选择 OfferFlow 导出的 JSON 文件，恢复到当前登录账号。</p></div><ArrowUpRight/></button><div className="privacy-note"><ShieldCheck/><div><h2>本机账号隔离</h2><p>不同账号使用不同的浏览器存储空间，关机重启后仍保留；内容不会上传服务器，也不能在另一台电脑自动找回。</p></div></div></section></>}
+        <footer><span>OfferFlow · 已登录本机账号 @{account.username}</span><span>账号隔离 · 自动保存 · 可导出备份</span></footer>
       </div>
     </main>
     <input ref={importRef} type="file" accept="application/json" hidden onChange={importData}/>
     {modalOpen && <ApplicationModal form={form} setForm={setForm} editing={Boolean(editingId)} onClose={() => setModalOpen(false)} onSubmit={saveApplication}/>} 
     {outreachOpen && <OutreachModal form={outreachForm} setForm={setOutreachForm} editing={Boolean(editingOutreachId)} onClose={() => setOutreachOpen(false)} onSubmit={saveOutreach}/>} 
+    {accountOpen && <LocalAccountModal account={account} onClose={() => setAccountOpen(false)} onLogout={onSessionEnd} onDeleted={onSessionEnd} onMessage={setToast}/>}
     {toast && <div className="toast"><Check size={17}/>{toast}</div>}
   </div>
 }
@@ -216,4 +232,10 @@ function OutreachModal({ form, setForm, editing, onClose, onSubmit }: { form: Om
 function ModalHead({ icon, title, text, onClose }: { icon: React.ReactNode, title: string, text: string, onClose: () => void }) { return <div className="modal-head"><div><span>{icon}</span><div><h2>{title}</h2><p>{text}</p></div></div><button type="button" onClick={onClose}><X/></button></div> }
 function ModalActions({ editing, onClose }: { editing: boolean, onClose: () => void }) { return <div className="modal-actions"><button type="button" onClick={onClose}>取消</button><button className="primary" type="submit">{editing ? '保存修改' : '保存记录'}</button></div> }
 
-export default App
+function OfferFlowRoot() {
+  const [account, setAccount] = useState<LocalAccount | null>(getCurrentAccount)
+  if (!account) return <LocalAccountGate blankData={blankAccountData} legacyData={readLegacyData()} onAuthenticated={setAccount}/>
+  return <App key={account.id} account={account} onSessionEnd={() => setAccount(null)}/>
+}
+
+export default OfferFlowRoot

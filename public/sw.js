@@ -1,4 +1,4 @@
-const CACHE = 'offerflow-v2';
+const CACHE = 'offerflow-v3';
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['./','./index.html','./icon.svg']))));
 self.addEventListener('activate', event => event.waitUntil(Promise.all([self.clients.claim(), caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))])));
 self.addEventListener('fetch', event => {
