@@ -1,0 +1,10 @@
+{
+  "name": "OfferFlow 秋招雷达",
+  "short_name": "OfferFlow",
+  "description": "投递信息管理与企业官网招聘情报",
+  "start_url": "./#/overview",
+  "display": "standalone",
+  "background_color": "#0b1120",
+  "theme_color": "#111827",
+  "icons": [{ "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
