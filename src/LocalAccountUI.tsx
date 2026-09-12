@@ -60,7 +60,7 @@ export function LocalAccountGate({ blankData, legacyData, onAuthenticated }: {
       <div className="account-heading"><span>{mode === 'login' ? <LogIn/> : <UserPlus/>}</span><div><h2>{mode === 'login' ? '登录本机账号' : '创建本机账号'}</h2><p>{mode === 'login' ? '继续管理你的个性化记录' : '账号仅在当前浏览器生效'}</p></div></div>
       <form onSubmit={submit} className="account-form">
         {mode === 'register' && <label>显示名称<input autoComplete="name" value={displayName} onChange={event => setDisplayName(event.target.value)} placeholder="例如：小穆"/></label>}
-        <label>账号<input required autoComplete="username" value={username} onChange={event => setUsername(event.target.value)} placeholder="3–24 位中文、字母或数字"/></label>
+        <label>账号<input required autoComplete="username" value={username} onChange={event => setUsername(event.target.value)} placeholder="3-24 位中文、字母或数字"/></label>
         <label>密码<input required minLength={6} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={event => setPassword(event.target.value)} placeholder="至少 6 位"/></label>
         {mode === 'register' && <label>确认密码<input required minLength={6} type="password" autoComplete="new-password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} placeholder="再次输入密码"/></label>}
         {mode === 'register' && hasLegacyData() && <label className="import-check"><input type="checkbox" checked={importExisting} onChange={event => setImportExisting(event.target.checked)}/><span><b>导入当前已有记录</b><small>把升级前的个人档案、投递和套磁记录归入新账号</small></span></label>}

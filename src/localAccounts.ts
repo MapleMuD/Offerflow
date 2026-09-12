@@ -1,4 +1,4 @@
-import type { Application, CandidateProfile, OutreachRecord } from './types'
+import type { Application, CandidateProfile, OutreachRecord, PhdTarget } from './types'
 
 const ACCOUNTS_KEY = 'offerflow-local-accounts-v1'
 const SESSION_KEY = 'offerflow-local-session-v1'
@@ -28,6 +28,7 @@ export interface AccountData {
   profile: CandidateProfile
   applications: Application[]
   outreachRecords: OutreachRecord[]
+  phdTargets: PhdTarget[]
 }
 
 function readAccounts(): StoredAccount[] {
@@ -104,7 +105,7 @@ export async function registerLocalAccount(
   initialData: AccountData,
 ) {
   const normalized = normalizeUsername(username)
-  if (!/^[a-z0-9_\u4e00-\u9fff]{3,24}$/i.test(normalized)) throw new Error('账号需为 3–24 位中文、字母、数字或下划线')
+  if (!/^[a-z0-9_\u4e00-\u9fff]{3,24}$/i.test(normalized)) throw new Error('账号需为 3-24 位中文、字母、数字或下划线')
   if (password.length < 6) throw new Error('密码至少需要 6 位')
   const accounts = readAccounts()
   if (accounts.some(account => normalizeUsername(account.username) === normalized)) throw new Error('该账号已在本机注册')
@@ -164,7 +165,13 @@ export function loadAccountData(accountId: string, fallback: AccountData): Accou
   try {
     const value = JSON.parse(localStorage.getItem(`${DATA_PREFIX}${accountId}`) || 'null')
     if (!value || !value.profile || !Array.isArray(value.applications) || !Array.isArray(value.outreachRecords)) return fallback
-    return value as AccountData
+    return {
+      profile: { ...fallback.profile, ...value.profile },
+      applications: value.applications,
+      outreachRecords: value.outreachRecords,
+      // 老版本没有院校字段。仅在字段缺失时补入默认目标；用户主动删空后保留空数组。
+      phdTargets: Array.isArray(value.phdTargets) ? value.phdTargets : fallback.phdTargets,
+    }
   } catch {
     return fallback
   }
